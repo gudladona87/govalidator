@@ -2282,7 +2282,7 @@ func TestValidateStructPointers(t *testing.T) {
 }
 
 func TestValiDateStructCustomField(t *testing.T) {
-	// Struct which uses pointers for values
+	// Struct which uses Custom Fields for values
 	type UserWithCustomField struct {
 		Email *string `valid:"email" json:"_email"`
 	}
@@ -2297,6 +2297,7 @@ func TestValiDateStructCustomField(t *testing.T) {
 
 	email := "invalid"
 	user := &UserWithCustomField{&email}
+	// Init the Tag which carries the target field name.
 	InitCustomTag("json")
 	_, err := ValidateStruct(user)
 
@@ -2305,6 +2306,7 @@ func TestValiDateStructCustomField(t *testing.T) {
 		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[0].param, tests[0].expected, actual)
 	}
 
+	// Tag can be Reset to use the element Name.
 	ResetCustomTag()
 	_, err = ValidateStruct(user)
 
@@ -2315,7 +2317,11 @@ func TestValiDateStructCustomField(t *testing.T) {
 }
 
 func TestValiDateStructCustomFieldAndCustomError(t *testing.T) {
-	// Struct which uses pointers for values
+	// Struct which uses Custom Fields and Errors for values
+	// Format:
+	// type MyType struct {
+	// 	FieldName Type 'valid:"tagOpt:ErrorDescription" CustomTag:"targetFieldName"'
+	// }
 	type UserWithCustomField struct {
 		Email *string `valid:"email:Email is Invalid" json:"_email"`
 	}
@@ -2330,6 +2336,7 @@ func TestValiDateStructCustomFieldAndCustomError(t *testing.T) {
 
 	email := "invalid"
 	user := &UserWithCustomField{&email}
+	// Init the Tag which carries the target field name.
 	InitCustomTag("json")
 	_, err := ValidateStruct(user)
 
@@ -2338,6 +2345,7 @@ func TestValiDateStructCustomFieldAndCustomError(t *testing.T) {
 		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[0].param, tests[0].expected, actual)
 	}
 
+	// Tag can be Reset to use the element Name.
 	ResetCustomTag()
 	_, err = ValidateStruct(user)
 
