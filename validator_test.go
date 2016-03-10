@@ -1508,7 +1508,7 @@ func TestIsDialString(t *testing.T) {
 		{"localhost.localdomain.intern:65535", true},
 		{"127.0.0.1:30000", true},
 		{"[::1]:80", true},
-		{"[1200::AB00:1234::2552:7777:1313]:22",false},
+		{"[1200::AB00:1234::2552:7777:1313]:22", false},
 		{"-localhost:1", false},
 		{"localhost.-localdomain:9090", false},
 		{"localhost.localdomain.-int:65535", false},
@@ -2278,6 +2278,72 @@ func TestValidateStructPointers(t *testing.T) {
 		if actual != test.expected {
 			t.Errorf("Expected ErrorByField(%q) to be %v, got %v", test.param, test.expected, actual)
 		}
+	}
+}
+
+func TestValiDateStructCustomField(t *testing.T) {
+	// Struct which uses pointers for values
+	type UserWithCustomField struct {
+		Email *string `valid:"email" json:"_email"`
+	}
+
+	var tests = []struct {
+		param    string
+		expected string
+	}{
+		{"_email", "invalid does not validate as email"},
+		{"Email", "invalid does not validate as email"},
+	}
+
+	email := "invalid"
+	user := &UserWithCustomField{&email}
+	InitCustomTag("json")
+	_, err := ValidateStruct(user)
+
+	actual := ErrorByField(err, tests[0].param)
+	if actual != tests[0].expected {
+		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[0].param, tests[0].expected, actual)
+	}
+
+	ResetCustomTag()
+	_, err = ValidateStruct(user)
+
+	actual = ErrorByField(err, tests[1].param)
+	if actual != tests[1].expected {
+		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[1].param, tests[1].expected, actual)
+	}
+}
+
+func TestValiDateStructCustomFieldAndCustomError(t *testing.T) {
+	// Struct which uses pointers for values
+	type UserWithCustomField struct {
+		Email *string `valid:"email:Email is Invalid" json:"_email"`
+	}
+
+	var tests = []struct {
+		param    string
+		expected string
+	}{
+		{"_email", "Email is Invalid"},
+		{"Email", "Email is Invalid"},
+	}
+
+	email := "invalid"
+	user := &UserWithCustomField{&email}
+	InitCustomTag("json")
+	_, err := ValidateStruct(user)
+
+	actual := ErrorByField(err, tests[0].param)
+	if actual != tests[0].expected {
+		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[0].param, tests[0].expected, actual)
+	}
+
+	ResetCustomTag()
+	_, err = ValidateStruct(user)
+
+	actual = ErrorByField(err, tests[1].param)
+	if actual != tests[1].expected {
+		t.Errorf("Expected ErrorByField(%q) to be %v, got %v", tests[1].param, tests[1].expected, actual)
 	}
 }
 

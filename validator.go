@@ -18,6 +18,8 @@ import (
 
 var fieldsRequiredByDefault bool
 
+var tagOptionsErrors map[string]string
+
 // SetFieldsRequiredByDefault causes validation to fail when struct fields
 // do not include validations or are not explicitly marked as exempt (using `valid:"-"` or `valid:"email,optional"`).
 // This struct definition will fail govalidator.ValidateStruct() (and the field values do not matter):
@@ -34,6 +36,14 @@ var fieldsRequiredByDefault bool
 //         Email string `valid:"email,optional"`
 func SetFieldsRequiredByDefault(value bool) {
 	fieldsRequiredByDefault = value
+}
+
+func InitCustomTag(tagName string) {
+	customTag = tagName
+}
+
+func ResetCustomTag() {
+	customTag = ""
 }
 
 // IsEmail check if the string is an email.
@@ -454,7 +464,7 @@ func IsISO3166Alpha3(str string) bool {
 
 // IsDNSName will validate the given string as a DNS name
 func IsDNSName(str string) bool {
-	if str == "" || len(strings.Replace(str,".","",-1)) > 255 {
+	if str == "" || len(strings.Replace(str, ".", "", -1)) > 255 {
 		// constraints already violated
 		return false
 	}
@@ -643,9 +653,9 @@ func (opts tagOptions) contains(optionName string) bool {
 	return false
 }
 
-func checkRequired(v reflect.Value, t reflect.StructField, options tagOptions) (bool, error) {
+func checkRequired(v reflect.Value, t reflect.StructField, options tagOptions, fieldName string) (bool, error) {
 	if options.contains("required") {
-		err := fmt.Errorf("non zero value required")
+		err := fmt.Errorf("%s is required", fieldName)
 		return false, Error{t.Name, err}
 	} else if fieldsRequiredByDefault && !options.contains("optional") {
 		err := fmt.Errorf("All fields are required to at least have one validation defined")
@@ -660,7 +670,11 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 		return false, nil
 	}
 
+	fieldName := t.Name
 	tag := t.Tag.Get(tagName)
+	if customTag != "" {
+		fieldName = t.Tag.Get(customTag)
+	}
 
 	// Check if the field should be ignored
 	switch tag {
@@ -669,21 +683,32 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 			return true, nil
 		}
 		err := fmt.Errorf("All fields are required to at least have one validation defined")
-		return false, Error{t.Name, err}
+		return false, Error{fieldName, err}
 	case "-":
 		return true, nil
 	}
 
 	options := parseTag(tag)
+	tagOptionsErrors = make(map[string]string)
 	for i := range options {
 		tagOpt := options[i]
+
+		if strings.Contains(tagOpt, ":") {
+			tagOptionsError := strings.Split(tagOpt, ":")
+			tagOpt = tagOptionsError[0]
+			tagOptionsErrors[tagOpt] = tagOptionsError[1]
+		}
+
 		if ok := isValidTag(tagOpt); !ok {
 			continue
 		}
 		if validatefunc, ok := CustomTypeTagMap[tagOpt]; ok {
 			options = append(options[:i], options[i+1:]...) // we found our custom validator, so remove it from the options
 			if result := validatefunc(v.Interface()); !result {
-				return false, Error{t.Name, fmt.Errorf("%s does not validate as %s", fmt.Sprint(v), tagOpt)}
+				if len(tagOptionsErrors) == 0 {
+					return false, Error{fieldName, fmt.Errorf("%s does not validate as %s", fmt.Sprint(v), tagOpt)}
+				}
+				return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
 			}
 			return true, nil
 		}
@@ -691,7 +716,7 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 
 	if isEmptyValue(v) {
 		// an empty value is not validated, check only required
-		return checkRequired(v, t, options)
+		return checkRequired(v, t, options, fieldName)
 	}
 
 	switch v.Kind() {
@@ -703,6 +728,13 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 		// for each tag option check the map of validator functions
 		for i := range options {
 			tagOpt := options[i]
+
+			if strings.Contains(tagOpt, ":") {
+				tagOptionsError := strings.Split(tagOpt, ":")
+				tagOpt = tagOptionsError[0]
+				tagOptionsErrors[tagOpt] = tagOptionsError[1]
+			}
+
 			negate := false
 			// Check wether the tag looks like '!something' or 'something'
 			if len(tagOpt) > 0 && tagOpt[0] == '!' {
@@ -710,8 +742,11 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 				negate = true
 			}
 			if ok := isValidTag(tagOpt); !ok {
-				err := fmt.Errorf("Unknown Validator %s", tagOpt)
-				return false, Error{t.Name, err}
+				if len(tagOptionsErrors) == 0 {
+					err := fmt.Errorf("Unknown Validator %s", tagOpt)
+					return false, Error{fieldName, err}
+				}
+				return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
 			}
 
 			// Check for param validators
@@ -729,12 +764,19 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 								} else {
 									err = fmt.Errorf("%s does validate as %s", field, tagOpt)
 								}
-								return false, Error{t.Name, err}
+								if len(tagOptionsErrors) == 0 {
+									return false, Error{fieldName, err}
+								}
+								return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
 							}
 						default:
 							//Not Yet Supported Types (Fail here!)
-							err := fmt.Errorf("Validator %s doesn't support kind %s", tagOpt, v.Kind())
-							return false, Error{t.Name, err}
+							if len(tagOptionsErrors) == 0 {
+								err := fmt.Errorf("Validator %s doesn't support kind %s", tagOpt, v.Kind())
+								return false, Error{fieldName, err}
+							}
+							return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
+
 						}
 					}
 				}
@@ -751,12 +793,18 @@ func typeCheck(v reflect.Value, t reflect.StructField) (bool, error) {
 						} else {
 							err = fmt.Errorf("%s does validate as %s", field, tagOpt)
 						}
-						return false, Error{t.Name, err}
+						if len(tagOptionsErrors) == 0 {
+							return false, Error{fieldName, err}
+						}
+						return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
 					}
 				default:
 					//Not Yet Supported Types (Fail here!)
 					err := fmt.Errorf("Validator %s doesn't support kind %s for value %v", tagOpt, v.Kind(), v)
-					return false, Error{t.Name, err}
+					if len(tagOptionsErrors) == 0 {
+						return false, Error{fieldName, err}
+					}
+					return false, Error{fieldName, fmt.Errorf(tagOptionsErrors[tagOpt])}
 				}
 			}
 		}
